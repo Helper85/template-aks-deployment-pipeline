@@ -1,0 +1,108 @@
+parameters:
+# Mandatory Parameters
+- name: aks_service_connection
+- name: deployment_type
+  values:
+  - yaml
+  - helm
+  - kustomize
+- name: namespace
+- name: environment
+
+# Optional Parameters
+- name: acr_service_connection
+  default: none
+
+- name: create_acr_secret
+  default: false
+
+- name: create_literal_secret
+  default: false
+
+- name: create_file_secret
+  default: false
+
+- name: secure_file
+  type: object
+  default:
+    - name: none
+      value: null
+
+- name: secret
+  type: object
+  default:
+    - name: none
+      value: null
+
+# YAML Parameters
+- name: manifests
+  default: null
+
+# Helm Parameters
+- name: helm_repo_name
+  default: null
+- name: helm_repo_url
+  default: null
+- name: helm_chart_name
+  default: null
+- name: helm_chart_version
+  default: latest
+- name: helm_release_name
+  default: null
+- name: helm_values_file
+  default: './values.yml'
+- name: helm_extra_yaml_template
+  default: 'none'
+
+# Kustomize Parameters
+- name: kustomize_path
+  default: "./"
+- name: kustomize_extra_yaml_template
+  default: none
+
+stages:
+- stage: prepare
+  displayName: Prepare 🧪
+  jobs:
+  - template: './jobs/prepare.yml'
+    parameters:
+      deployment_type: ${{ parameters.deployment_type }}
+      manifests: ${{ parameters.manifests }}
+      helm_repo_name: ${{ parameters.helm_repo_name }}
+      helm_repo_url: ${{ parameters.helm_repo_url }}
+      helm_chart_name: ${{ parameters.helm_chart_name }}
+      helm_chart_version: ${{ parameters.helm_chart_version }}
+      helm_release_name: ${{ parameters.helm_release_name }}
+      helm_values_file: ${{ parameters.helm_values_file }}
+      helm_extra_yaml_template: ${{ parameters.helm_extra_yaml_template }}
+      kustomize_path: ${{ parameters.kustomize_path }}
+      kustomize_extra_yaml_template: ${{ parameters.kustomize_extra_yaml_template }}
+
+- stage: deploy
+  displayName: Deploy 🚀
+  # Deploy stage will only run for commits to the main/master branch (via Pull Request)
+  condition: and(succeeded(), or(contains(variables['Build.SourceBranchName'], 'main'), contains(variables['Build.SourceBranchName'], 'master')))
+  jobs:
+  - template: './jobs/deploy.yml'
+    parameters:
+      environment: ${{ parameters.environment }}
+      aks_service_connection: ${{ parameters.aks_service_connection }}
+      acr_service_connection: ${{ parameters.acr_service_connection }}
+      deployment_type: ${{ parameters.deployment_type }}
+      namespace: ${{ parameters.namespace }}
+      manifests: ${{ parameters.manifests }}
+      create_acr_secret: ${{ parameters.create_acr_secret }}
+      create_literal_secret: ${{ parameters.create_literal_secret }}
+      create_file_secret: ${{ parameters.create_file_secret }}
+      secure_file: ${{ parameters.secure_file }}
+      secret: ${{ parameters.secret }}
+      helm_repo_name: ${{ parameters.helm_repo_name }}
+      helm_repo_url: ${{ parameters.helm_repo_url }}
+      helm_chart_name: ${{ parameters.helm_chart_name }}
+      helm_chart_version: ${{ parameters.helm_chart_version }}
+      helm_release_name: ${{ parameters.helm_release_name }}
+      helm_values_file: ${{ parameters.helm_values_file }}
+      helm_extra_yaml_template: ${{ parameters.helm_extra_yaml_template }}
+      kustomize_path: ${{ parameters.kustomize_path }}
+      kustomize_extra_yaml_template: ${{ parameters.kustomize_extra_yaml_template }}
+  

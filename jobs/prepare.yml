@@ -1,0 +1,91 @@
+jobs:
+  - job: tool_versions
+    displayName: Show Tool Versions
+
+    steps:
+    - checkout: none
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          kubectl version
+      displayName: Kubectl Version
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          kubectl krew version
+      displayName: Krew Version
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          vault --version
+      displayName: Vault Version
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          helm version
+      displayName: Helm Version
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          printenv
+      displayName: Environment Variables
+  
+  - job: kubeconform
+    displayName: kubeconform - Manifest Validation Checks
+
+    steps:
+    - script: kubeconform -summary -verbose ${{ parameters.manifests }}
+      displayName: kubeconform
+      condition: eq('${{ parameters.deployment_type }}', 'yaml')
+
+  - job: polaris
+    displayName: polaris - Security Best Practice Checks
+
+    steps:
+    - checkout: self
+    - checkout: template-aks-deployment-pipeline
+     
+    # YAML Deployment Types
+    - script: polaris audit --audit-path ./$BUILD_REPOSITORY_NAME/${{ parameters.manifests }} --format pretty --set-exit-code-on-danger --config ./template-aks-deployment-pipeline/jobs/polaris_checks.yml
+      displayName: polaris audit - YAML
+      condition: eq('${{ parameters.deployment_type }}', 'yaml')
+
+    # Helm Deployment Types
+    - script: helm repo add ${{ parameters.helm_repo_name }} ${{ parameters.helm_repo_url }} && helm repo update
+      displayName: Add Helm Repository
+      condition: eq('${{ parameters.deployment_type }}', 'helm')
+
+    - script: helm template ${{ parameters.helm_release_name }} ${{ parameters.helm_chart_name }} --version ${{ parameters.helm_chart_version }} --values ./$BUILD_REPOSITORY_NAME/${{ parameters.helm_values_file }} > polaris-helm-template.yml && cat ./$BUILD_REPOSITORY_NAME/${{ parameters.helm_extra_yaml_template }} >> polaris-helm-template.yml
+      displayName: helm template
+      condition: and(ne('${{ parameters.helm_extra_yaml_template }}', 'none'), eq('${{ parameters.deployment_type }}', 'helm'))
+
+    - script: helm template ${{ parameters.helm_release_name }} ${{ parameters.helm_chart_name }} --version ${{ parameters.helm_chart_version }} --values ./$BUILD_REPOSITORY_NAME/${{ parameters.helm_values_file }} > polaris-helm-template.yml
+      displayName: helm template + extra YAML
+      condition: and(eq('${{ parameters.helm_extra_yaml_template }}', 'none'), eq('${{ parameters.deployment_type }}', 'helm'))
+
+    - script: polaris audit --audit-path ./polaris-helm-template.yml --format pretty --set-exit-code-on-danger --config ./template-aks-deployment-pipeline/jobs/polaris_checks.yml
+      displayName: polaris audit - Helm
+      condition: eq('${{ parameters.deployment_type }}', 'helm')
+
+    # Kustomize Deployment Types
+    - script: kubectl kustomize ./$BUILD_REPOSITORY_NAME > polaris-kustomize-template.yml
+      displayName: kustomize build
+      condition: and(eq('${{ parameters.kustomize_extra_yaml_template }}', 'none'), eq('${{ parameters.deployment_type }}', 'kustomize'))
+    
+    - script: kubectl kustomize ./$BUILD_REPOSITORY_NAME > polaris-kustomize-template.yml && cat ./$BUILD_REPOSITORY_NAME/${{ parameters.kustomize_extra_yaml_template }} >> polaris-kustomize-template.yml
+      displayName: kustomize build + extra YAML
+      condition: and(ne('${{ parameters.kustomize_extra_yaml_template }}', 'none'), eq('${{ parameters.deployment_type }}', 'kustomize'))
+
+    - script: polaris audit --audit-path ./polaris-kustomize-template.yml --format pretty --set-exit-code-on-danger --config ./template-aks-deployment-pipeline/jobs/polaris_checks.yml
+      displayName: polaris audit - Kustomize
+      condition: eq('${{ parameters.deployment_type }}', 'kustomize')

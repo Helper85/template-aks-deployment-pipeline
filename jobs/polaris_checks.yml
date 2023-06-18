@@ -1,0 +1,78 @@
+checks:
+  # ignore
+  linuxHardening: ignore
+  tlsSettingsMissing: ignore
+
+  # danger (pipeline failure)
+  privilegeEscalationAllowed: danger
+  runAsPrivileged: danger
+  dangerousCapabilities: danger
+  hostIPCSet: danger
+  hostNetworkSet: danger
+  hostPortSet: danger
+
+  # warning
+  pullPolicyNotAlways: warning
+  deploymentMissingReplicas: warning
+  insecureCapabilities: warning
+  readinessProbeMissing: warning
+  livenessProbeMissing: warning
+  runAsRootAllowed: warning
+  tagNotSpecified: warning
+  deploymentMissingReplicas: warning
+  cpuRequestsMissing: warning
+  memoryRequestsMissing: warning
+  cpuLimitsMissing: warning
+  memoryLimitsMissing: warning
+
+  # custom checks
+  microSegmentation: danger
+  spotNodeTaintToleration: warning
+
+customChecks:
+  spotNodeTaintToleration:
+    successMessage: Tolerations have been defined.
+    failureMessage: No tolerations have been defined. If this deployment is targeted to a non-production AKS cluster and needs to allow scheduling of pods to Azure Spot Nodes, this could cause failures with pod scheduling.
+    category: Reliability
+    target: Controller
+    schema:
+      '$schema': http://json-schema.org/draft-07/schema
+      type: object
+      properties:
+        spec:
+          type: object
+          required:
+          - template
+          properties:
+            template:
+              type: object
+              required:
+              - spec
+              properties:
+                spec:
+                  type: object
+                  required:
+                  - tolerations
+              
+  microSegmentation:
+    successMessage: A networkPolicy is defined for the workload
+    failureMessage: No networkPolicy has been defined for the workload
+    category: Security
+    target: Controller
+    schema:
+      '$schema': http://json-schema.org/draft-07/schema
+      type: object
+      properties:
+        metadata:
+          type: object
+          properties:
+            labels:
+              type: object
+              minProperties: 1
+    additionalSchemaStrings:
+      networking.k8s.io/NetworkPolicy: |
+        type: object
+        properties:
+          spec:
+            type: object
+            required: ["podSelector", "ingress"]

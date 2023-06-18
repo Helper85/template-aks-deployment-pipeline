@@ -1,0 +1,121 @@
+jobs:
+- deployment: aks
+  displayName: 'AKS Deployment'
+  environment: ${{ parameters.environment }}
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        ## Create Namespace
+        - task: Kubernetes@1
+          displayName: Create Namespace
+          inputs:
+            connectionType: 'Kubernetes Service Connection'
+            kubernetesServiceEndpoint: ${{ parameters.aks_service_connection }}
+            command: apply
+            useConfigurationFile: true
+            configurationType: inline
+            inline: |
+               apiVersion: v1
+               kind: Namespace
+               metadata:
+                 name: ${{ parameters.namespace }}
+
+        - ${{ each file in parameters.secure_file }}:
+          - task: DownloadSecureFile@1
+            name: ${{ file.secret_name }}
+            displayName: 'Download DevOps Secure File'
+            inputs:
+              secureFile: ${{ file.file_name }}
+            condition: eq('${{ parameters.create_file_secret }}', true)
+          
+          - task: KubernetesManifest@0
+            displayName: Create Secure File Secret
+            condition: eq('${{ parameters.create_file_secret }}', true)
+            inputs:
+              action: createSecret
+              kubernetesServiceConnection: ${{ parameters.aks_service_connection }}
+              namespace: ${{ parameters.namespace }}
+              secretType: generic
+              secretName: ${{ file.secret_name }}
+              secretArguments: --from-file=${{ file.secret_name }}=$(${{ file.secret_name }}.secureFilePath)
+        
+        - ${{ each secret in parameters.secret }}:
+          - task: KubernetesManifest@0
+            displayName: Create Literal Secret
+            condition: eq('${{ parameters.create_literal_secret }}', true)
+            inputs:
+              action: createSecret
+              kubernetesServiceConnection: ${{ parameters.aks_service_connection }}
+              namespace: ${{ parameters.namespace }}
+              secretType: generic
+              secretName: ${{ secret.name }}
+              secretArguments: --from-literal=${{ secret.name }}=${{ secret.value }}
+
+        - task: KubernetesManifest@0
+          displayName: Create ACR ImagePullSecret
+          condition: eq('${{ parameters.create_acr_secret }}', true)
+          inputs:
+            action: 'createSecret'
+            secretName: 'acr'
+            secretType: dockerRegistry
+            kubernetesServiceConnection: ${{ parameters.aks_service_connection }}
+            dockerRegistryEndpoint: ${{ parameters.acr_service_connection }}
+            namespace: ${{ parameters.namespace }}
+        
+        # YAML Deployment Types
+
+        - task: KubernetesManifest@0
+          displayName: YAML Deployment
+          condition: and(succeeded(), eq('${{ parameters.deployment_type }}', 'yaml'))
+          inputs:
+            action: 'deploy'
+            kubernetesServiceConnection: ${{ parameters.aks_service_connection }}
+            namespace: ${{ parameters.namespace }}
+            manifests: ${{ parameters.manifests }}/*.yml
+
+        # Helm Deployment Types
+
+        - script: helm repo add ${{ parameters.helm_repo_name }} ${{ parameters.helm_repo_url }} && helm repo update
+          displayName: Add Helm Repository
+          condition: and(succeeded(), eq('${{ parameters.deployment_type }}', 'helm'))
+  
+        - task: HelmDeploy@0
+          displayName: Helm Deployment
+          condition: and(succeeded(), eq('${{ parameters.deployment_type }}', 'helm'))
+          inputs:
+            connectionType: 'Kubernetes Service Connection'
+            kubernetesServiceConnection: ${{ parameters.aks_service_connection }}
+            namespace: ${{ parameters.namespace }}
+            command: 'upgrade'
+            chartName: ${{ parameters.helm_chart_name }}
+            chartVersion: ${{ parameters.helm_chart_version }}
+            releaseName: ${{ parameters.helm_release_name }}
+            valueFile: ${{ parameters.helm_values_file }}
+
+        - task: KubernetesManifest@0
+          displayName: Helm Extra YAML Deployment
+          condition: and(succeeded(), eq('${{ parameters.deployment_type }}', 'helm'))
+          inputs:
+            action: 'deploy'
+            kubernetesServiceConnection: ${{ parameters.aks_service_connection }}
+            namespace: ${{ parameters.namespace }}
+            manifests: ./${{ parameters.helm_extra_yaml_template }}
+
+        # Kustomize Deployment Types
+        - script: kubectl kustomize . > kustomize-template.yml
+          displayName: kustomize build
+          condition: and(eq('${{ parameters.kustomize_extra_yaml_template }}', 'none'), eq('${{ parameters.deployment_type }}', 'kustomize'))
+        
+        - script: kubectl kustomize . > kustomize-template.yml && cat ./${{ parameters.kustomize_extra_yaml_template }} >> kustomize-template.yml
+          displayName: kustomize build + extra YAML
+          condition: and(ne('${{ parameters.kustomize_extra_yaml_template }}', 'none'), eq('${{ parameters.deployment_type }}', 'kustomize'))
+
+        - task: KubernetesManifest@0
+          displayName: Kustomize Deployment
+          condition: and(succeeded(), eq('${{ parameters.deployment_type }}', 'kustomize'))
+          inputs:
+            action: 'deploy'
+            kubernetesServiceConnection: ${{ parameters.aks_service_connection }}
+            namespace: ${{ parameters.namespace }}
+            manifests: ./${{ parameters.kustomize_extra_yaml_template }}
